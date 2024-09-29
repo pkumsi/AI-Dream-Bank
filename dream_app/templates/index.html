@@ -1,0 +1,130 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Dreamy Voice Input</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+</head>
+
+<body>
+    <!-- WebGL Canvas -->
+    <canvas id="bgCanvas"></canvas>
+
+    <div class="container" id="portalContainer">
+        <h1>Welcome to the Dream Analysis Portal</h1>
+        <form method="POST">
+            <div class="input-group">
+                <label for="text-input">Enter your dream:</label>
+                <textarea name="text-input" id="text-input"></textarea>
+            </div>
+            <button type="button" id="micButton">🎤 Audio Input</button>
+            <button type="submit">Submit</button>
+        </form>
+        {% if transcript %}
+        <div class="output">
+            <h2>Transcription:</h2>
+            <p>{{ transcript }}</p>
+        </div>
+        {% endif %}
+    </div>
+
+    <script>
+        // WebGL background with Three.js
+        const scene = new THREE.Scene();
+        const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
+        const renderer = new THREE.WebGLRenderer({ canvas: document.getElementById("bgCanvas"), alpha: true });
+        renderer.setSize(window.innerWidth, window.innerHeight);
+        camera.position.setZ(30);
+
+        // Create particles
+        const particleGeometry = new THREE.BufferGeometry();
+        const particleCount = 10000;
+        const positions = new Float32Array(particleCount * 3);
+
+        for (let i = 0; i < particleCount; i++) {
+            positions[i * 3] = (Math.random() - 0.5) * 100;
+            positions[i * 3 + 1] = (Math.random() - 0.5) * 100;
+            positions[i * 3 + 2] = (Math.random() - 0.5) * 100;
+        }
+
+        particleGeometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+        let particleMaterial = new THREE.PointsMaterial({ color: 0x00ccff, size: 0.05 }); // Default blue color
+        const particles = new THREE.Points(particleGeometry, particleMaterial);
+        scene.add(particles);
+
+        // Microphone button functionality
+        const micButton = document.getElementById('micButton');
+        let audioContext, analyser, dataArray;
+        let isRecording = false;
+
+        micButton.addEventListener('click', async () => {
+            if (isRecording) {
+                stopRecording();
+            } else {
+                startRecording();
+            }
+        });
+
+        async function startRecording() {
+            try {
+                const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+                audioContext = new (window.AudioContext || window.webkitAudioContext)();
+                analyser = audioContext.createAnalyser();
+                analyser.fftSize = 2048;
+                const source = audioContext.createMediaStreamSource(stream);
+                source.connect(analyser);
+                dataArray = new Uint8Array(analyser.frequencyBinCount);
+
+                // Change particles to golden when microphone is activated
+                particleMaterial.color.set(0xffd700); // Golden color
+                micButton.textContent = "Stop Recording"; // Update button text
+                isRecording = true;
+
+                animateMic(); // Start microphone-related animation
+
+            } catch (err) {
+                console.error('Error accessing microphone:', err);
+            }
+        }
+
+        function stopRecording() {
+            // Stop the microphone and revert particle color
+            if (audioContext) {
+                audioContext.close(); // Stop the audio context
+            }
+
+            // Change particles back to blue when stopped
+            particleMaterial.color.set(0x00ccff); // Blue color
+            micButton.textContent = "🎤 Audio Input"; // Update button text
+            isRecording = false;
+        }
+
+        // Regular particles animation
+        function animate() {
+            requestAnimationFrame(animate);
+            particles.rotation.x += 0.0001;
+            particles.rotation.y += 0.0002;
+            renderer.render(scene, camera);
+        }
+
+        function animateMic() {
+            if (!isRecording) return; // Stop the animation if not recording
+            requestAnimationFrame(animateMic);
+            analyser.getByteFrequencyData(dataArray);
+            renderer.render(scene, camera);
+        }
+
+        animate(); // Start the regular animation
+
+        window.addEventListener('resize', () => {
+            renderer.setSize(window.innerWidth, window.innerHeight);
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+        });
+    </script>
+</body>
+
+</html>
