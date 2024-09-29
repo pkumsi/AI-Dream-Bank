@@ -1,0 +1,23 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Dream Interpretation Results</title>
+</head>
+<body>
+    <h1>Dream Interpretation</h1>
+    <p>Your Dream: {{ dream_text }}</p>
+
+    <h2>Freudian Interpretations:</h2>
+    <ul>
+        {% for term, meaning in interpretation_results %}
+            <li><strong>{{ term }}:</strong> {{ meaning }}</li>
+        {% else %}
+            <li>No Freudian interpretations found.</li>
+        {% endfor %}
+    </ul>
+
+    <a href="/">Go Back</a>
+</body>
+</html>
