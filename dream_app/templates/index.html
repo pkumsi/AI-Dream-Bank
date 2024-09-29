@@ -7,6 +7,88 @@
     <title>Dreamy Voice Input</title>
     <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
     <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <style>
+        /* Alert styling */
+        #alert {
+            position: fixed;
+            top: -100px;
+            left: 50%;
+            transform: translateX(-50%);
+            background-color: #ffcc00;
+            color: black;
+            padding: 15px;
+            border-radius: 5px;
+            box-shadow: 0 4px 8px rgba(0, 0, 0, 0.2);
+            font-size: 18px;
+            text-align: center;
+            width: 300px;
+            transition: top 0.5s ease-in-out;
+            z-index: 1000;
+        }
+
+        #alert.active {
+            top: 20px;
+        }
+
+        /* Button styling for recording */
+        #micButton.recording {
+            background-color: #ffcc00;
+            color: black;
+        }
+
+        /* Media player styling */
+        #replayContainer {
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            margin-top: 20px;
+            flex-direction: column;
+        }
+
+        #audioPlayer {
+            display: block;
+            width: 100%;
+            max-width: 300px;
+            background-color: rgba(255, 255, 255, 0.8);
+            border-radius: 10px;
+            box-shadow: 0 4px 8px rgba(0, 0, 0, 0.2);
+        }
+
+        audio {
+            width: 100%;
+            height: 40px;
+            outline: none;
+            border-radius: 10px;
+        }
+
+        /* Volume control buttons */
+        .volume-controls {
+            margin-top: 10px;
+            display: flex;
+            justify-content: center;
+            gap: 10px;
+        }
+
+        .volume-controls button {
+            padding: 10px 20px;
+            font-size: 16px;
+            border-radius: 5px;
+            background-color: #007bff;
+            color: white;
+            border: none;
+            cursor: pointer;
+            transition: background-color 0.3s ease;
+        }
+
+        .volume-controls button:hover {
+            background-color: #0056b3;
+        }
+
+        /* Customizing the audio player color (limited browser support) */
+        audio::-webkit-media-controls-panel {
+            background-color: #007bff;
+        }
+    </style>
 </head>
 
 <body>
@@ -15,7 +97,9 @@
 
     <div class="container" id="portalContainer">
         <h1>Welcome to the Dream Analysis Portal</h1>
-        <form method="POST">
+        <form method="POST" action="/submit_dream"
+        enctype="multipart/form-data">
+
             <div class="input-group">
                 <label for="text-input">Enter your dream:</label>
                 <textarea name="text-input" id="text-input"></textarea>
@@ -29,7 +113,22 @@
             <p>{{ transcript }}</p>
         </div>
         {% endif %}
+        <div id="transcriptContainer" style="display:none;">
+            <h2>Transcription:</h2>
+            <p id="transcript"></p>
+        </div>
+        <div id="replayContainer" style="display:none;">
+            <audio id="audioPlayer" controls></audio>
+            <div class="volume-controls">
+                <button id="volumeUp">🔊 Volume Up</button>
+                <button id="volumeDown">🔉 Volume Down</button>
+                <button id="mute">🔇 Mute</button>
+            </div>
+        </div>
     </div>
+
+    <!-- Alert for recording -->
+    <div id="alert">Recording has started...</div>
 
     <script>
         // WebGL background with Three.js
@@ -51,14 +150,41 @@
         }
 
         particleGeometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
-        let particleMaterial = new THREE.PointsMaterial({ color: 0x00ccff, size: 0.05 }); // Default blue color
+        let particleMaterial = new THREE.PointsMaterial({ color: 0x00ccff, size: 0.05 });
         const particles = new THREE.Points(particleGeometry, particleMaterial);
         scene.add(particles);
 
         // Microphone button functionality
         const micButton = document.getElementById('micButton');
-        let audioContext, analyser, dataArray;
+        const alertBox = document.getElementById('alert');
+        const replayContainer = document.getElementById('replayContainer');
+        const transcriptContainer = document.getElementById('transcriptContainer');
+        const transcriptDisplay = document.getElementById('transcript');
+        const audioPlayer = document.getElementById('audioPlayer');
+        let audioContext, analyser, dataArray, mediaRecorder, audioChunks = [], mediaStream;
         let isRecording = false;
+        let recordedAudioBlob, audioUrl;
+
+        let recognition;
+        const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+
+        if (SpeechRecognition) {
+            recognition = new SpeechRecognition();
+            recognition.continuous = true;
+            recognition.interimResults = false;
+
+            recognition.onresult = function (event) {
+                let transcript = event.results[event.results.length - 1][0].transcript;
+                transcriptDisplay.textContent += transcript + ' ';
+                transcriptContainer.style.display = 'block';
+            };
+
+            recognition.onerror = function (event) {
+                console.error('Speech recognition error detected: ' + event.error);
+            };
+        } else {
+            console.error('Speech Recognition API not supported in this browser.');
+        }
 
         micButton.addEventListener('click', async () => {
             if (isRecording) {
@@ -70,20 +196,32 @@
 
         async function startRecording() {
             try {
-                const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-                audioContext = new (window.AudioContext || window.webkitAudioContext)();
-                analyser = audioContext.createAnalyser();
-                analyser.fftSize = 2048;
-                const source = audioContext.createMediaStreamSource(stream);
-                source.connect(analyser);
-                dataArray = new Uint8Array(analyser.frequencyBinCount);
+                mediaStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+                mediaRecorder = new MediaRecorder(mediaStream);
 
-                // Change particles to golden when microphone is activated
-                particleMaterial.color.set(0xffd700); // Golden color
-                micButton.textContent = "Stop Recording"; // Update button text
+                mediaRecorder.ondataavailable = event => {
+                    audioChunks.push(event.data);
+                };
+
+                mediaRecorder.onstop = () => {
+                    recordedAudioBlob = new Blob(audioChunks, { type: 'audio/wav' });
+                    audioUrl = URL.createObjectURL(recordedAudioBlob);
+                    audioPlayer.src = audioUrl;
+                    replayContainer.style.display = 'flex';
+                };
+
+                mediaRecorder.start();
+                audioChunks = [];
+
+                particleMaterial.color.set(0xffd700);
+                micButton.textContent = "Stop Recording";
+                micButton.classList.add('recording');
                 isRecording = true;
 
-                animateMic(); // Start microphone-related animation
+                alertBox.classList.add('active');
+                animateMic();
+
+                if (recognition) recognition.start();
 
             } catch (err) {
                 console.error('Error accessing microphone:', err);
@@ -91,38 +229,60 @@
         }
 
         function stopRecording() {
-            // Stop the microphone and revert particle color
-            if (audioContext) {
-                audioContext.close(); // Stop the audio context
-            }
+            if (mediaRecorder) mediaRecorder.stop();
+            if (mediaStream) mediaStream.getTracks().forEach(track => track.stop());
 
-            // Change particles back to blue when stopped
-            particleMaterial.color.set(0x00ccff); // Blue color
-            micButton.textContent = "🎤 Audio Input"; // Update button text
+            particleMaterial.color.set(0x00ccff);
+            micButton.textContent = "Record Again";
+            micButton.classList.remove('recording');
             isRecording = false;
+
+            alertBox.classList.remove('active');
+            if (recognition) recognition.stop();
         }
 
-        // Regular particles animation
-        function animate() {
-            requestAnimationFrame(animate);
-            particles.rotation.x += 0.0001;
-            particles.rotation.y += 0.0002;
-            renderer.render(scene, camera);
-        }
+        // Volume control buttons
+        const volumeUpButton = document.getElementById('volumeUp');
+        const volumeDownButton = document.getElementById('volumeDown');
+        const muteButton = document.getElementById('mute');
 
+        volumeUpButton.addEventListener('click', () => {
+            if (audioPlayer.volume < 1) {
+                audioPlayer.volume = Math.min(1, audioPlayer.volume + 0.1);
+            }
+        });
+
+        volumeDownButton.addEventListener('click', () => {
+            if (audioPlayer.volume > 0) {
+                audioPlayer.volume = Math.max(0, audioPlayer.volume - 0.1);
+            }
+        });
+
+        muteButton.addEventListener('click', () => {
+            audioPlayer.muted = !audioPlayer.muted;
+            muteButton.textContent = audioPlayer.muted ? "🔈 Unmute" : "🔇 Mute";
+        });
+
+        // Function to animate recording
         function animateMic() {
-            if (!isRecording) return; // Stop the animation if not recording
+            const scale = isRecording ? 0.1 + Math.abs(Math.sin(Date.now() * 0.005)) * 0.2 : 0.1;
+            particles.scale.set(scale, scale, scale);
             requestAnimationFrame(animateMic);
-            analyser.getByteFrequencyData(dataArray);
-            renderer.render(scene, camera);
         }
 
-        animate(); // Start the regular animation
+        // Animate the particles
+        function animate() {
+            particles.rotation.x += 0.0005;
+            particles.rotation.y += 0.0005;
+            renderer.render(scene, camera);
+            requestAnimationFrame(animate);
+        }
+        animate();
 
         window.addEventListener('resize', () => {
-            renderer.setSize(window.innerWidth, window.innerHeight);
             camera.aspect = window.innerWidth / window.innerHeight;
             camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
         });
     </script>
 </body>
