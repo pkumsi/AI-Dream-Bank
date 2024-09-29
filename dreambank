@@ -1,0 +1,11 @@
+import requests
+from bs4 import BeautifulSoup
+
+url = 'http://www.dreambank.net/collection'
+response = requests.get(url)
+soup = BeautifulSoup(response.content, 'html.parser')
+
+# Find and extract dream texts or links to detailed dream pages
+dreams = soup.find_all('div', class_='dream-text')
+for dream in dreams:
+    print(dream.text)
